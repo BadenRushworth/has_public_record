@@ -13,9 +13,14 @@ module HasPublicRecord
     end
 
     class_methods do
-      # Called by the has_public_record macro. Touches no database table, so it is safe while the app boots
-      # (db:create, assets:precompile).
+      # Called by the has_public_record macro. Touches no database table, so it is safe while the app boots.
       def declare_public_record(prefix:, column:, length:, max_bumps:)
+        if public_record_options
+          raise HasPublicRecord::Error,
+                "#{name || inspect} already has has_public_record (prefix #{public_record_options.prefix.inspect}); " \
+                "declare it once, on the base class"
+        end
+
         prefix = HasPublicRecord.registry.register(prefix, name)
         self.public_record_options = Options.new(prefix: prefix, column: column.to_sym, length: length, max_bumps: max_bumps)
 
@@ -27,14 +32,9 @@ module HasPublicRecord
       def public_id_prefix = public_record_options.prefix
       def public_id_column = public_record_options.column
 
-      # "usr_K3F9A2" -> itself; "K3F9A2" (bare) -> "usr_K3F9A2"; another model's id or junk -> nil.
-      def normalize_public_id(ref)
-        text = ref.to_s.strip
-        return nil if text.empty?
-        return "#{public_id_prefix}#{SEPARATOR}#{text}" unless text.include?(SEPARATOR)
-
-        text.start_with?("#{public_id_prefix}#{SEPARATOR}") && text.size > public_id_prefix.size + 1 ? text : nil
-      end
+      # The stored form of a ref: "usr_K3F9A2". Accepts the bare code and any letter case (see HasPublicRecord.fold_case).
+      # nil for another model's id, for junk and for blank.
+      def normalize_public_id(ref) = HasPublicRecord.canonicalize(ref, public_id_prefix)
 
       def public_id?(ref) = !normalize_public_id(ref).nil?
 
@@ -48,9 +48,20 @@ module HasPublicRecord
           raise(ActiveRecord::RecordNotFound.new("Couldn't find #{name} with public id #{ref.inspect}", name, public_id_column, ref))
       end
 
+      # What a controller passes in: User.from_param!(params[:id]).
+      def from_param(param) = find_by_public_id(param)
+      def from_param!(param) = find_by_public_id!(param)
+
       # A relation for several ids at once; ids of another model are ignored.
       def with_public_id(*refs)
         where(public_id_column => refs.flatten.filter_map { |ref| normalize_public_id(ref) })
+      end
+
+      # A regexp for route constraints (no anchors, as Rails wants): resources :users, constraints: { id: User.public_id_format }
+      def public_id_format
+        alphabet = HasPublicRecord.config.alphabet
+        chars = Regexp.escape((alphabet.chars + alphabet.swapcase.chars).uniq.join)
+        /(?i:#{Regexp.escape(public_id_prefix)})#{SEPARATOR}[#{chars}]+/
       end
 
       # Rows that have no public id yet (after adding the column to an existing table).
@@ -80,6 +91,38 @@ module HasPublicRecord
         end
         count
       end
+
+      # insert_all / upsert_all skip callbacks, so rows get no id. This fills it in, one distinct id per row, and
+      # keeps ids you supplied:  User.insert_all(User.with_generated_public_ids(rows))
+      def with_generated_public_ids(rows)
+        column = public_id_column
+        taken = Set.new
+        rows.map do |row|
+          row = row.to_h.symbolize_keys
+          if row[column].present?
+            taken << row[column]
+            next row
+          end
+
+          id = generate_public_id
+          id = generate_public_id while taken.include?(id) # the database probe cannot see the rest of this batch
+          taken << id
+          row.merge(column => id)
+        end
+      end
+
+      # A stable id for a fixture label, for ERB in fixtures (Rails fixtures skip callbacks):
+      #   public_id: <%= User.fixture_public_id(:alice) %>
+      def fixture_public_id(label)
+        length = HasPublicRecord::Generator.starting_length(table_name, public_record_options.length)
+        HasPublicRecord.fixture_id(public_id_prefix, label, length: length)
+      end
+    end
+
+    # A copy is a new record: it must not carry the original's id into the unique index.
+    def initialize_dup(other)
+      super
+      self[self.class.public_id_column] = nil
     end
 
     def public_id_prefix = self.class.public_id_prefix

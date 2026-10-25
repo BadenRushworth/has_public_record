@@ -2,6 +2,8 @@
 
 require "active_support"
 require "active_support/core_ext/object/blank"
+require "active_support/number_helper"
+require "digest"
 require "zeitwerk"
 require_relative "has_public_record/version"
 
@@ -21,7 +23,7 @@ module HasPublicRecord
 
   SEPARATOR = "_"
   PREFIX_FORMAT = /\A[a-z][a-z0-9]{0,9}\z/
-  REF_FORMAT = /\A([a-z][a-z0-9]{0,9})#{SEPARATOR}(\S+)\z/
+  REF_FORMAT = /\A([a-z][a-z0-9]{0,9})#{SEPARATOR}(\S+)\z/i # any letter case: people type ids
   Parsed = Data.define(:prefix, :bare)
 
   @config = Configuration.new
@@ -38,11 +40,36 @@ module HasPublicRecord
 
     # "usr_K3F9A2" -> Parsed(prefix: "usr", bare: "K3F9A2"); nil when it is not shaped like a ref.
     def parse(ref)
-      match = REF_FORMAT.match(ref.to_s.strip)
-      match && Parsed.new(prefix: match[1], bare: match[2])
+      match = REF_FORMAT.match(ref.to_s.strip) or return nil
+      Parsed.new(prefix: match[1].downcase, bare: fold_case(match[2]))
     end
 
     def valid?(ref) = !parse(ref).nil?
+
+    # Ids are stored in one case. When the alphabet has only upper-case (or only lower-case) letters, anything typed
+    # is folded to it; an alphabet with both cases is left exactly as typed.
+    def fold_case(text)
+      alphabet = config.alphabet
+      if alphabet == alphabet.upcase then text.upcase
+      elsif alphabet == alphabet.downcase then text.downcase
+      else text
+      end
+    end
+
+    # The stored form ("usr_K3F9A2") of a ref that belongs to prefix; the bare code is accepted. nil for a ref of
+    # another prefix or a blank one. With no prefix, just the folded text.
+    def canonicalize(ref, prefix)
+      text = ref.to_s.strip
+      return nil if text.empty?
+      return fold_case(text) unless prefix
+
+      head, separator, tail = text.partition(SEPARATOR)
+      if separator.empty?
+        "#{prefix}#{SEPARATOR}#{fold_case(head)}"
+      elsif head.downcase == prefix && !tail.empty?
+        "#{prefix}#{SEPARATOR}#{fold_case(tail)}"
+      end
+    end
 
     # { "usr" => "User", ... } for every model declared so far.
     def prefixes = registry.to_h
@@ -71,7 +98,39 @@ module HasPublicRecord
       resolve(ref) || raise(ActiveRecord::RecordNotFound, "Couldn't find a record for public id #{ref.inspect}")
     end
 
-    def generate(...) = Generator.generate(...)
+    # Mixed refs (an audit log, polymorphic references) in one query per model, not one per ref.
+    # Returns { ref => record } for the refs that resolved, keyed by the ref as given. Bare codes cannot be
+    # resolved without a model, so they are skipped.
+    def resolve_many(*refs)
+      found = {}
+      refs.flatten.compact.uniq.group_by { |ref| model_for(ref) }.each do |model, list|
+        next unless model
+
+        by_id = model.with_public_id(list).index_by { |record| record[model.public_id_column] }
+        list.each do |ref|
+          record = by_id[model.normalize_public_id(ref)]
+          found[ref] = record if record
+        end
+      end
+      found
+    end
+
+    # Makes an id without a model; see Generator and Identifier.
+    #   HasPublicRecord.generate("inv", length: 8) { |id| !Invoice.exists?(number: id) }
+    def generate(prefix = nil, **options, &block) = Generator.generate(**{ prefix: prefix }.merge(options), &block)
+
+    def identifier(prefix = nil, **options, &free) = Identifier.new(prefix, **options, &free)
+
+    # A stable id for a label, for fixtures and seeds: the same label always gives the same id.
+    def fixture_id(prefix, label, length: config.default_length)
+      number = Digest::SHA512.hexdigest("#{prefix}:#{label}").to_i(16)
+      chars = config.alphabet.chars
+      bare = Array.new(length) do
+        number, digit = number.divmod(chars.size)
+        chars[digit]
+      end.join
+      prefix ? "#{prefix}#{SEPARATOR}#{bare}" : bare
+    end
 
     # For specs: forget every declaration, learned length and setting.
     def reset!

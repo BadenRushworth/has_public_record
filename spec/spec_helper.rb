@@ -28,6 +28,9 @@ class Widget < ActiveRecord::Base
   has_public_record prefix: "wid", length: 4
 end
 
+# STI-style subclass: shares User's table and prefix.
+class Admin < User; end
+
 RSpec.configure do |config|
   config.expect_with(:rspec) { |c| c.syntax = :expect }
   config.after do

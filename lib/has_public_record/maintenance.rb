@@ -7,11 +7,22 @@ module HasPublicRecord
       def ok? = problem.nil? && missing.zero? && wrong_prefix.zero? && duplicates.zero?
     end
 
+    # How full a table's code space is. Growth starts well before 100%: at half full, one random try in two hits
+    # a taken code, so ten tries in a row fail about once in a thousand.
+    Capacity = Data.define(:length, :slots, :used) do
+      def fill = used.fdiv(slots)
+
+      def to_s
+        "#{length} chars = #{ActiveSupport::NumberHelper.number_to_human(slots)} ids, #{format('%.4f', fill * 100)}% used"
+      end
+    end
+
     class << self
       # Every model that declared has_public_record (one per table and column), optionally only the named one.
       def models(only: nil)
         found = ActiveRecord::Base.descendants.select do |model|
-          model.respond_to?(:public_record_options) && model.public_record_options && !model.abstract_class?
+          model.respond_to?(:public_record_options) && model.public_record_options && model.name.present? &&
+            !model.abstract_class? && model == model.base_class
         end
         found = found.uniq { |model| [model.table_name, model.public_id_column] }.sort_by(&:to_s)
         only ? found.select { |model| model.name == only.to_s } : found
@@ -63,6 +74,12 @@ module HasPublicRecord
         ActiveSupport::Notifications.instrument("rename.has_public_record",
                                                 table: model.table_name, column: column, from: from, to: to, count: count)
         count
+      end
+
+      def capacity(model)
+        length = Generator.starting_length(model.table_name, model.public_record_options.length)
+        used = model.base_class.unscoped.where.not(model.public_id_column => [nil, ""]).count
+        Capacity.new(length: length, slots: HasPublicRecord.config.alphabet.size**length, used: used)
       end
 
       private

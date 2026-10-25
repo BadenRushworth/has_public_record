@@ -23,7 +23,7 @@ namespace :has_public_record do
     end
   end
 
-  desc "Missing ids, ids with the wrong prefix, duplicates (MODEL=User to limit). Exits 1 when anything is off"
+  desc "Missing ids, wrong prefixes, duplicates and capacity (MODEL=User to limit). Exits 1 when anything is off"
   task report: :prepare do
     reports = HasPublicRecord::Maintenance.reports(only: ENV["MODEL"].presence)
     abort "No model declares has_public_record." if reports.empty?
@@ -33,10 +33,11 @@ namespace :has_public_record do
       if r.problem
         puts "#{label}: #{r.problem}"
       elsif r.ok?
-        puts "#{label}: #{r.total} rows, ok"
+        puts "#{label}: #{r.total} rows, ok; #{HasPublicRecord::Maintenance.capacity(r.model)}"
       else
         puts "#{label}: #{r.total} rows, #{r.missing} missing, #{r.wrong_prefix} wrong prefix" \
-             "#{" (e.g. #{r.wrong_samples.join(', ')})" if r.wrong_samples.any?}, #{r.duplicates} duplicated"
+             "#{" (e.g. #{r.wrong_samples.join(', ')})" if r.wrong_samples.any?}, #{r.duplicates} duplicated; " \
+             "#{HasPublicRecord::Maintenance.capacity(r.model)}"
       end
     end
     exit 1 unless reports.all?(&:ok?)

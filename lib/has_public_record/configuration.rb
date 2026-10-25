@@ -4,6 +4,9 @@ module HasPublicRecord
   # HasPublicRecord.configure { |c| c.default_length = 8 }
   class Configuration
     DEFAULT_ALPHABET = (("0".."9").to_a + ("A".."Z").to_a).join.freeze
+    # No 0/O or 1/I/L: easier to read aloud and to type from a screenshot.
+    UNAMBIGUOUS = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+    PRESETS = { default: DEFAULT_ALPHABET, unambiguous: UNAMBIGUOUS }.freeze
 
     attr_reader :default_length, :attempts_per_length, :max_length_bumps, :alphabet, :lengths
 
@@ -31,6 +34,9 @@ module HasPublicRecord
     end
 
     def alphabet=(value)
+      if value.is_a?(Symbol)
+        value = PRESETS.fetch(value) { raise ArgumentError, "unknown alphabet preset #{value.inspect} (expected #{PRESETS.keys.join(', ')})" }
+      end
       chars = value.to_s.each_char.uniq
       raise ArgumentError, "alphabet needs at least 2 distinct characters" if chars.size < 2
       if chars.any? { |char| char == SEPARATOR || char.match?(/\s/) }

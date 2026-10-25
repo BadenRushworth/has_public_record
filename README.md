@@ -107,7 +107,7 @@ For new tables, `t.string :public_id, null: false, index: { unique: true }` is e
 | Task | What it does |
 | --- | --- |
 | `has_public_record:backfill` | Fills missing ids (`MODEL=User` to limit) |
-| `has_public_record:report` | Counts missing ids, wrong prefixes and duplicates; exits 1 if anything is off |
+| `has_public_record:report` | Counts missing ids, wrong prefixes and duplicates, and shows how full each table's code space is; exits 1 if anything is off |
 | `has_public_record:rename MODEL=User FROM=old` | Previews moving stored ids from an old prefix to the declared one; add `APPLY=1` to do it, in one transaction |
 
 Renaming a prefix breaks every stored URL and any id saved in another table.
@@ -116,13 +116,73 @@ Renaming a prefix breaks every stored URL and any id saved in another table.
 
 Through ActiveSupport::Notifications, never a logger of its own:
 
-- `grow.has_public_record` with `table`, `column`, `from`, `to`
+- `grow.has_public_record` with `key`, `table`, `column` (both nil for a standalone generator), `from`, `to`
 - `rename.has_public_record` with `table`, `column`, `from`, `to`, `count`
 
 ## Engines
 
 Works inside an engine. Prefixes are global per process, so choose distinctive ones. An engine should not call
 `HasPublicRecord.configure` (it is process-wide); use the per-model `length:` and `max_bumps:` instead.
+
+## Lookup helpers
+
+Ids are matched in any letter case (`usr_k3f9a2` finds `usr_K3F9A2`) when the alphabet has one case; an alphabet
+with both cases is left as typed.
+
+| Helper | What it does |
+| --- | --- |
+| `User.from_param(params[:id])` / `from_param!` | What a controller has: nil-safe and raising versions |
+| `User.public_id_format` | A regexp for route constraints: `resources :users, constraints: { id: User.public_id_format }` |
+| `HasPublicRecord.resolve_many(*refs)` | Mixed refs (an audit log) in one query per model; returns `{ ref => record }` |
+
+## Ids without a model
+
+The generator needs no model. Whether a code is free is a block:
+
+~~~ruby
+HasPublicRecord.generate("inv", length: 8) { |id| !Invoice.exists?(number: id) }   # => "inv_7K2QX9AB"
+HasPublicRecord.generate(nil, length: 5, key: "codes") { |id| !Redis.exists?(id) } # bare code: key names its growth
+
+invoices = HasPublicRecord.identifier("inv", length: 8) { |id| !Invoice.exists?(number: id) }
+invoices.generate                  # grows and notifies exactly like models do
+invoices.valid?("inv_7K2QX9AB")    # => true
+invoices.bare("inv_7K2QX9AB")      # => "7K2QX9AB"
+~~~
+
+Standalone prefixes are not registered for `HasPublicRecord.resolve`; only models are. A prefix a model already
+declared is refused.
+
+## Testing
+
+Rails fixtures and `insert_all` skip callbacks, so rows get no id unless you supply one:
+
+~~~ruby
+# fixtures: the same label always gives the same id
+alice:
+  public_id: <%= User.fixture_public_id(:alice) %>
+
+# bulk inserts
+User.insert_all(User.with_generated_public_ids(rows))
+~~~
+
+## Alphabets
+
+`config.alphabet = :unambiguous` leaves out 0/O and 1/I/L, which makes ids easier to read aloud. The default
+is `0-9A-Z`.
+
+## Associations
+
+Plain Rails associations are enough. Keep integer foreign keys inside the system and use the public id only at
+the edge, scoped through the owner so one person cannot reach another's records:
+
+~~~ruby
+current_user.sessions.find_by_public_id!(params[:id])
+~~~
+
+## Capacity
+
+`has_public_record:report` shows how full each table's code space is. Growth starts well before 100%: at half
+full, ten random tries in a row all hit taken codes about once in a thousand.
 
 ## License
 

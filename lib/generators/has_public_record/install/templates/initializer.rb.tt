@@ -14,7 +14,7 @@ HasPublicRecord.configure do |config|
   # config.max_length_bumps = <%= defaults.max_length_bumps %>
 
   # Characters used in ids: 2+ distinct, no "_" and no whitespace.
-  # config.alphabet = "<%= defaults.alphabet %>"
+  # config.alphabet = "<%= defaults.alphabet %>"   # or a preset: :unambiguous (no 0/O, 1/I/L)
 
   # Starting length per table; beats a model's own length: option. Keys are table names.
   # config.lengths = { "users" => 8 }
