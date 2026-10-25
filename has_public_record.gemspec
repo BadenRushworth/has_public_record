@@ -10,10 +10,15 @@ Gem::Specification.new do |spec|
   spec.summary     = "Short, prefixed, URL-safe public ids for ActiveRecord models (usr_K3F9A2)."
   spec.description = "has_public_record gives a model a random prefixed public id that grows in length as the table fills."
   spec.license     = "MIT"
+  spec.homepage    = "https://github.com/BadenRushworth/has_public_record"
+  spec.metadata["homepage_uri"] = spec.homepage
+  spec.metadata["source_code_uri"] = spec.homepage
+  spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata["bug_tracker_uri"] = "#{spec.homepage}/issues"
   spec.required_ruby_version = ">= 3.2"
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  spec.files = Dir["lib/**/*", "README.md", "LICENSE.txt"]
+  spec.files = Dir["lib/**/*", "README.md", "LICENSE.txt", "CHANGELOG.md"]
 
   spec.add_dependency "activerecord", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
