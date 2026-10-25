@@ -1,0 +1,16 @@
+# frozen_string_literal: true
+
+# Adds the public id column (nullable) and its unique index. Then fill existing rows:
+#   rails has_public_record:backfill MODEL=YourModel
+# and, once every row has an id (rails has_public_record:report), make it required:
+#   rails g has_public_record:migration <%= table_name %> --enforce
+class <%= migration_class_name %> < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
+<% if options[:concurrently] -%>
+  disable_ddl_transaction!
+
+<% end -%>
+  def change
+    add_column :<%= table_name %>, :<%= public_column %>, :string
+    add_index :<%= table_name %>, :<%= public_column %>, unique: true<%= ", algorithm: :concurrently" if options[:concurrently] %>
+  end
+end

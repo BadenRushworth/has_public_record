@@ -1,0 +1,21 @@
+# frozen_string_literal: true
+
+# has_public_record settings. Everything is commented out and shows its default: uncomment what you want to change.
+# Prefixes are not settings: each model declares its own (has_public_record prefix: "usr").
+
+HasPublicRecord.configure do |config|
+  # Starting length of the random part of an id (the prefix is extra). Grows by itself on dense tables.
+  # config.default_length = <%= defaults.default_length %>
+
+  # Random tries at one length before it grows by one.
+  # config.attempts_per_length = <%= defaults.attempts_per_length %>
+
+  # How many times the length may grow before ExhaustedError is raised.
+  # config.max_length_bumps = <%= defaults.max_length_bumps %>
+
+  # Characters used in ids: 2+ distinct, no "_" and no whitespace.
+  # config.alphabet = "<%= defaults.alphabet %>"
+
+  # Starting length per table; beats a model's own length: option. Keys are table names.
+  # config.lengths = { "users" => 8 }
+end

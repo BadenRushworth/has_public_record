@@ -1,0 +1,8 @@
+# frozen_string_literal: true
+
+# Run after the backfill: fails if any row still has no id.
+class <%= migration_class_name %> < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
+  def change
+    change_column_null :<%= table_name %>, :<%= public_column %>, false
+  end
+end

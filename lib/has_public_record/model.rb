@@ -1,0 +1,111 @@
+# frozen_string_literal: true
+
+require "active_support/concern"
+
+module HasPublicRecord
+  module Model
+    extend ActiveSupport::Concern
+
+    Options = Data.define(:prefix, :column, :length, :max_bumps)
+
+    included do
+      class_attribute :public_record_options, instance_writer: false, instance_predicate: false
+    end
+
+    class_methods do
+      # Called by the has_public_record macro. Touches no database table, so it is safe while the app boots
+      # (db:create, assets:precompile).
+      def declare_public_record(prefix:, column:, length:, max_bumps:)
+        prefix = HasPublicRecord.registry.register(prefix, name)
+        self.public_record_options = Options.new(prefix: prefix, column: column.to_sym, length: length, max_bumps: max_bumps)
+
+        attr_readonly column # a public id never changes once created
+        before_create :assign_public_record
+        validate :validate_public_record_format, on: :create
+      end
+
+      def public_id_prefix = public_record_options.prefix
+      def public_id_column = public_record_options.column
+
+      # "usr_K3F9A2" -> itself; "K3F9A2" (bare) -> "usr_K3F9A2"; another model's id or junk -> nil.
+      def normalize_public_id(ref)
+        text = ref.to_s.strip
+        return nil if text.empty?
+        return "#{public_id_prefix}#{SEPARATOR}#{text}" unless text.include?(SEPARATOR)
+
+        text.start_with?("#{public_id_prefix}#{SEPARATOR}") && text.size > public_id_prefix.size + 1 ? text : nil
+      end
+
+      def public_id?(ref) = !normalize_public_id(ref).nil?
+
+      def find_by_public_id(ref)
+        id = normalize_public_id(ref)
+        id && find_by(public_id_column => id)
+      end
+
+      def find_by_public_id!(ref)
+        find_by_public_id(ref) ||
+          raise(ActiveRecord::RecordNotFound.new("Couldn't find #{name} with public id #{ref.inspect}", name, public_id_column, ref))
+      end
+
+      # A relation for several ids at once; ids of another model are ignored.
+      def with_public_id(*refs)
+        where(public_id_column => refs.flatten.filter_map { |ref| normalize_public_id(ref) })
+      end
+
+      # Rows that have no public id yet (after adding the column to an existing table).
+      def missing_public_id = where(public_id_column => nil)
+
+      # A fresh unused id for this model (what before_create uses).
+      def generate_public_id
+        HasPublicRecord::Generator.generate(scope: base_class.unscoped, column: public_id_column, prefix: public_id_prefix,
+                                            length: public_record_options.length, max_bumps: public_record_options.max_bumps)
+      end
+
+      # The one row a record is stored in, ignoring default scopes. Handles composite primary keys. A table with no
+      # primary key is refused: an empty condition would match every row.
+      def public_record_row_scope(record)
+        keys = Array(base_class.primary_key)
+        raise HasPublicRecord::Error, "#{name} has no primary key, so a single row cannot be addressed" if keys.empty?
+
+        base_class.unscoped.where(keys.zip(Array(record.id)).to_h)
+      end
+
+      # Gives every row without an id one; returns how many. Plain SQL updates: the column is readonly through the
+      # model, and callbacks and updated_at stay untouched.
+      def backfill_public_ids!(batch_size: 1000)
+        count = 0
+        missing_public_id.find_each(batch_size: batch_size) do |record|
+          count += public_record_row_scope(record).update_all(public_id_column => generate_public_id)
+        end
+        count
+      end
+    end
+
+    def public_id_prefix = self.class.public_id_prefix
+
+    # "usr_K3F9A2" -> "K3F9A2"
+    def public_id_bare
+      value = self[self.class.public_id_column]
+      value&.delete_prefix("#{public_id_prefix}#{SEPARATOR}")
+    end
+
+    # Rails' url helpers use this: user_path(user) -> /users/usr_K3F9A2
+    def to_param = (self[self.class.public_id_column] if persisted?)
+
+    private
+
+    def assign_public_record
+      column = self.class.public_id_column
+      self[column] = self.class.generate_public_id if self[column].blank?
+    end
+
+    def validate_public_record_format
+      column = self.class.public_id_column
+      value = self[column]
+      return if value.blank? || self.class.normalize_public_id(value) == value
+
+      errors.add(column, :invalid)
+    end
+  end
+end
