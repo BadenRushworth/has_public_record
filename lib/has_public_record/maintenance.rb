@@ -18,14 +18,25 @@ module HasPublicRecord
     end
 
     class << self
-      # Every model that declared has_public_record (one per table and column), optionally only the named one.
+      # Every model that declared has_public_record (base classes only, so STI subclasses are not listed twice).
+      # only: accepts "User", "user" or "users" (also "billing/invoice").
       def models(only: nil)
         found = ActiveRecord::Base.descendants.select do |model|
           model.respond_to?(:public_record_options) && model.public_record_options && model.name.present? &&
             !model.abstract_class? && model == model.base_class
-        end
-        found = found.uniq { |model| [model.table_name, model.public_id_column] }.sort_by(&:to_s)
-        only ? found.select { |model| model.name == only.to_s } : found
+        end.sort_by(&:to_s)
+        return found unless only
+
+        names = name_variants(only)
+        found.select { |model| names.include?(model.name) }
+      end
+
+      # Like models, but raises HasPublicRecord::Error when nothing matches (the rake tasks turn that into an abort).
+      def models!(only: nil)
+        found = models(only: only)
+        return found unless found.empty?
+
+        raise Error, only ? "No model named #{only} declares has_public_record." : "No model declares has_public_record."
       end
 
       def reports(only: nil) = models(only: only).map { |model| report(model) }
@@ -49,8 +60,15 @@ module HasPublicRecord
                    duplicates: present.group(column).having("COUNT(*) > 1").count.size, problem: nil)
       end
 
+      def capacity(model)
+        length = Generator.starting_length(model.table_name, model.public_record_options.length)
+        used = model.base_class.unscoped.where.not(model.public_id_column => [nil, ""]).count
+        Capacity.new(length: length, slots: HasPublicRecord.config.alphabet.size**length, used: used)
+      end
+
       # Moves stored ids from an old prefix to the model's declared one (change prefix: in the model first).
-      # Counts only unless apply: true. One transaction: all rows move or none do. Returns the rows concerned.
+      # Counts only unless apply: true (the count is then an estimate from the database). One transaction: all rows
+      # move or none do. Returns the rows actually changed.
       def rename_prefix(model, from:, apply: false, batch_size: 1000)
         from = from.to_s
         to = model.public_id_prefix
@@ -60,29 +78,28 @@ module HasPublicRecord
         column = model.public_id_column
         old = "#{from}#{SEPARATOR}"
         scope = model.base_class.unscoped.where(with_prefix(model, old))
-        count = scope.count
-        return count unless apply && count.positive?
+        return scope.count unless apply
 
+        renamed = 0
         model.transaction do
           scope.find_each(batch_size: batch_size) do |record|
-            next unless record[column].start_with?(old) # the LIKE may be case-insensitive on some databases
+            current = record[column]
+            next unless current.start_with?(old) # the LIKE may be case-insensitive on some databases
 
-            renamed = "#{to}#{SEPARATOR}#{record[column].delete_prefix(old)}"
-            model.public_record_row_scope(record).update_all(column => renamed)
+            renamed += model.public_record_row_scope(record).update_all(column => "#{to}#{SEPARATOR}#{current.delete_prefix(old)}")
           end
         end
         ActiveSupport::Notifications.instrument("rename.has_public_record",
-                                                table: model.table_name, column: column, from: from, to: to, count: count)
-        count
-      end
-
-      def capacity(model)
-        length = Generator.starting_length(model.table_name, model.public_record_options.length)
-        used = model.base_class.unscoped.where.not(model.public_id_column => [nil, ""]).count
-        Capacity.new(length: length, slots: HasPublicRecord.config.alphabet.size**length, used: used)
+                                                table: model.table_name, column: column, from: from, to: to, count: renamed)
+        renamed
       end
 
       private
+
+      def name_variants(only)
+        text = only.to_s.strip
+        [text, text.camelize, text.singularize.camelize].uniq
+      end
 
       def broken(model, problem)
         Report.new(model: model, table: model.table_name, column: model.public_id_column, total: 0, missing: 0,

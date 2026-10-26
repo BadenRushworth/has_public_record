@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 # Run after the backfill: fails if any row still has no id.
+#
+# Big PostgreSQL table? change_column_null scans it under a lock. The lock-light way (PostgreSQL 12+) is a CHECK
+# constraint added unvalidated and validated separately; with a validated constraint in place, NOT NULL needs no scan:
+#   add_check_constraint :<%= table_name %>, "<%= public_column %> IS NOT NULL", name: "<%= table_name %>_<%= public_column %>_not_null", validate: false
+#   validate_check_constraint :<%= table_name %>, name: "<%= table_name %>_<%= public_column %>_not_null"
 class <%= migration_class_name %> < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
     change_column_null :<%= table_name %>, :<%= public_column %>, false

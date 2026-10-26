@@ -6,16 +6,16 @@ namespace :has_public_record do
     Rails.application.eager_load!
   end
 
-  def hpr_models
-    only = ENV["MODEL"].presence
-    models = HasPublicRecord::Maintenance.models(only: only)
-    abort "No model#{" named #{only}" if only} declares has_public_record." if models.empty?
-    models
+  # A lambda, not a def: a def inside a rake file defines a method on Object for the whole host app.
+  pick_models = lambda do
+    HasPublicRecord::Maintenance.models!(only: ENV["MODEL"].presence)
+  rescue HasPublicRecord::Error => e
+    abort e.message
   end
 
   desc "Give every row without a public id one (MODEL=User to limit)"
   task backfill: :prepare do
-    hpr_models.each do |model|
+    pick_models.call.each do |model|
       problem = HasPublicRecord::Maintenance.report(model).problem
       next puts("#{model.name}: skipped, #{problem}") if problem
 
@@ -23,10 +23,9 @@ namespace :has_public_record do
     end
   end
 
-  desc "Missing ids, wrong prefixes, duplicates and capacity (MODEL=User to limit). Exits 1 when anything is off"
+  desc "Missing ids, wrong prefixes, duplicates and capacity (MODEL=User to limit). Fails when anything is off"
   task report: :prepare do
-    reports = HasPublicRecord::Maintenance.reports(only: ENV["MODEL"].presence)
-    abort "No model declares has_public_record." if reports.empty?
+    reports = pick_models.call.map { |model| HasPublicRecord::Maintenance.report(model) }
 
     reports.each do |r|
       label = "#{r.model.name} (#{r.table}.#{r.column}, prefix #{r.model.public_id_prefix})"
@@ -40,14 +39,14 @@ namespace :has_public_record do
              "#{HasPublicRecord::Maintenance.capacity(r.model)}"
       end
     end
-    exit 1 unless reports.all?(&:ok?)
+    abort "has_public_record:report found problems (see above)" unless reports.all?(&:ok?)
   end
 
   desc "Rename stored ids from an old prefix to the model's declared one: MODEL=User FROM=old [APPLY=1]"
   task rename: :prepare do
     from = ENV["FROM"].presence or abort "Give the old prefix: FROM=old"
     ENV["MODEL"].presence or abort "Give the model: MODEL=User"
-    model = hpr_models.first
+    model = pick_models.call.first
     apply = ENV["APPLY"].present?
 
     count = HasPublicRecord::Maintenance.rename_prefix(model, from: from, apply: apply)

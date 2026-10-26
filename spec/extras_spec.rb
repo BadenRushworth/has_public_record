@@ -84,9 +84,9 @@ RSpec.describe "has_public_record extras" do
     end
 
     it "never gives two rows of one batch the same id" do
-      allow(User).to receive(:generate_public_id).and_return("usr_DUP001", "usr_DUP001", "usr_OTHER1")
+      allow(HasPublicRecord::Generator).to receive(:random).and_return("DUPLIC", "DUPLIC", "OTHER1", "OTHER2")
       rows = User.with_generated_public_ids([{ name: "a" }, { name: "b" }])
-      expect(rows.map { |row| row[:public_id] }).to eq(%w[usr_DUP001 usr_OTHER1])
+      expect(rows.map { |row| row[:public_id] }).to eq(%w[usr_DUPLIC usr_OTHER1])
     end
   end
 

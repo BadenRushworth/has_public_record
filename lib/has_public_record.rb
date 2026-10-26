@@ -71,6 +71,17 @@ module HasPublicRecord
       end
     end
 
+    # Whether ref is an id this prefix could have issued: the prefix, then only characters of the current alphabet.
+    # For vetting ids that are GIVEN. Lookups use canonicalize, which does not check the alphabet, so ids made under an
+    # older alphabet stay findable.
+    def well_formed?(ref, prefix)
+      head, separator, tail = ref.to_s.partition(SEPARATOR)
+      return false if separator.empty? || head != prefix.to_s || tail.empty?
+
+      alphabet = config.alphabet
+      tail.each_char.all? { |char| alphabet.include?(char) }
+    end
+
     # { "usr" => "User", ... } for every model declared so far.
     def prefixes = registry.to_h
 
@@ -130,6 +141,13 @@ module HasPublicRecord
         chars[digit]
       end.join
       prefix ? "#{prefix}#{SEPARATOR}#{bare}" : bare
+    end
+
+    # Forgets which class declared which prefix. Rails calls this when it unloads code in development, so a renamed
+    # class or prefix does not raise DuplicatePrefixError; the reloaded classes declare themselves again.
+    def reset_registry!
+      registry.clear!
+      @models_loaded = false
     end
 
     # For specs: forget every declaration, learned length and setting.

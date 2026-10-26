@@ -13,8 +13,8 @@ RSpec.describe HasPublicRecord::Maintenance do
   describe ".report" do
     it "counts missing, wrong-prefix and clean rows" do
       User.create!
-      User.insert_all([{ name: "a", public_id: nil }, { name: "b", public_id: "K3F9A2" },
-                       { name: "c", public_id: "wid_ABC123" }])
+      User.insert_all([{ name: "a", public_id: nil }, { name: "b", public_id: nil }, { name: "c", public_id: "wid_ABC123" }])
+      User.connection.execute("UPDATE users SET public_id = 'K3F9A2' WHERE name = 'b'") # raw SQL: a legacy bare code
 
       report = described_class.report(User)
       expect(report).to have_attributes(total: 4, missing: 1, wrong_prefix: 2, duplicates: 0, problem: nil)

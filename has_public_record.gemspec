@@ -11,7 +11,6 @@ Gem::Specification.new do |spec|
   spec.description = "has_public_record gives a model a random prefixed public id that grows in length as the table fills."
   spec.license     = "MIT"
   spec.homepage    = "https://github.com/BadenRushworth/has_public_record"
-  spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = spec.homepage
   spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
   spec.metadata["bug_tracker_uri"] = "#{spec.homepage}/issues"
@@ -22,6 +21,7 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "activerecord", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
+  spec.add_dependency "concurrent-ruby", "~> 1.1"
   spec.add_dependency "railties", ">= 7.1"
   spec.add_dependency "zeitwerk", ">= 2.6"
 end

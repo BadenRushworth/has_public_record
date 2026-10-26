@@ -16,7 +16,7 @@ module HasPublicRecord
       class_option :column, type: :string, default: "public_id", desc: "Column name"
       class_option :enforce, type: :boolean, default: false, desc: "Make the column NOT NULL (run after the backfill)"
       class_option :concurrently, type: :boolean, default: false,
-                                  desc: "PostgreSQL only: build the index without locking writes"
+                                  desc: "Build the index without locking writes (PostgreSQL; elsewhere it is built normally)"
 
       def create_migration_file
         migration_template(options[:enforce] ? "enforce.rb.tt" : "add.rb.tt",
@@ -24,6 +24,9 @@ module HasPublicRecord
       end
 
       private
+
+      # The name as given: Rails would pluralize it ("status" -> "statuses").
+      def table_name = name.to_s
 
       def public_column = options[:column]
 

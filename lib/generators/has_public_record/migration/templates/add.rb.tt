@@ -6,11 +6,18 @@
 #   rails g has_public_record:migration <%= table_name %> --enforce
 class <%= migration_class_name %> < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
 <% if options[:concurrently] -%>
-  disable_ddl_transaction!
+  disable_ddl_transaction! # needed to build an index concurrently; harmless on other databases
 
 <% end -%>
   def change
     add_column :<%= table_name %>, :<%= public_column %>, :string
-    add_index :<%= table_name %>, :<%= public_column %>, unique: true<%= ", algorithm: :concurrently" if options[:concurrently] %>
+<% if options[:concurrently] -%>
+    # Only PostgreSQL can build an index without locking writes; other databases build it normally.
+    index_options = { unique: true }
+    index_options[:algorithm] = :concurrently if connection.adapter_name.match?(/postgres/i)
+    add_index :<%= table_name %>, :<%= public_column %>, **index_options
+<% else -%>
+    add_index :<%= table_name %>, :<%= public_column %>, unique: true
+<% end -%>
   end
 end
